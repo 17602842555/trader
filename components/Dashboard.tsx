@@ -164,8 +164,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
       
       {/* Unified Overview Card */}
       <div className="bg-surface rounded-xl border border-border shadow-lg transition-colors overflow-hidden flex flex-col
-            // 手机横屏时强制高度铺满，防止露出下方内容
-            landscape:h-[85vh] landscape:min-h-[350px] 
+            landscape:h-[95vh] landscape:min-h-[350px] 
             portrait:min-h-auto
       ">
         
