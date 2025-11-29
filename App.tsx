@@ -49,6 +49,7 @@ const App: React.FC = () => {
     }
   }, [config]);
 
+  // 1. Startup Sync (Run once on load)
   useEffect(() => {
       if (config.githubToken) {
           service.syncHistoryWithGitHub()
@@ -61,6 +62,26 @@ const App: React.FC = () => {
               });
       }
   }, [service]);
+
+  // 2. NEW: Periodic Auto-Sync (Every 30 minutes)
+  useEffect(() => {
+      if (!config.githubToken) return;
+
+      const interval = setInterval(() => {
+          service.syncHistoryWithGitHub()
+              .then(() => {
+                  // Optional: show a discreet toast or just log
+                  console.log("Auto-sync to GitHub completed");
+                  // You can uncomment the line below if you want a notification every 30 mins
+                  // addToast(t.syncSuccess, 'success'); 
+              })
+              .catch(e => {
+                  console.error("Auto-sync failed", e);
+              });
+      }, 30 * 60 * 1000); // 30 minutes in milliseconds
+
+      return () => clearInterval(interval);
+  }, [service, config.githubToken]);
 
   const addToast = (text: string, type: 'success' | 'error' | 'info') => {
     const id = Date.now().toString();
@@ -150,7 +171,6 @@ const App: React.FC = () => {
       case 'history':
         return (
           <div className="p-4 md:p-0 flex-1">
-            {/* Updated: Passing colorMode to HistoryAnalysis */}
             <HistoryAnalysis service={service} t={t} colorMode={config.colorMode} />
           </div>
         );
