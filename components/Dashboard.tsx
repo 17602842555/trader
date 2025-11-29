@@ -60,18 +60,30 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
     };
   }, [expandedPosition, service]);
 
+  // --- Currency & Rate Logic ---
+  const rate = useMemo(() => service.exchangeRates[unit] || 1, [unit, service.exchangeRates]);
+  
+  const currencySymbol = useMemo(() => {
+      switch(unit) {
+          case 'CNY': return '¥';
+          case 'BTC': return '₿';
+          default: return '$';
+      }
+  }, [unit]);
+
   // --- Data Processing for Chart & Stats ---
   const processedHistory = useMemo(() => {
       return assetHistory.map(item => ({
           ...item,
-          tsNum: parseInt(item.ts), // Convert to number for continuous axis
-          val: parseFloat(item.totalEq)
+          tsNum: parseInt(item.ts), 
+          // FIX: Apply exchange rate to chart values
+          val: parseFloat(item.totalEq) * rate
       }));
-  }, [assetHistory]);
+  }, [assetHistory, rate]);
 
-  const { minPoint, maxPoint, periodPnL, periodPnLPct, startEq, endEq } = useMemo(() => {
+  const { minPoint, maxPoint, periodPnL, periodPnLPct } = useMemo(() => {
       if (processedHistory.length < 2) return { 
-          minPoint: null, maxPoint: null, periodPnL: 0, periodPnLPct: 0, startEq: 0, endEq: 0 
+          minPoint: null, maxPoint: null, periodPnL: 0, periodPnLPct: 0 
       };
       
       let min = processedHistory[0];
@@ -92,28 +104,30 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
           maxPoint: max, 
           periodPnL: change, 
           periodPnLPct: pct,
-          startEq: start,
-          endEq: end
       };
   }, [processedHistory]);
+
+  // FIX: Dynamic Color based on Trend (Green for Up, Red for Down)
+  const isTrendUp = periodPnL >= 0;
+  const trendColor = isTrendUp ? '#10b981' : '#ef4444'; // Emerald-500 : Red-500
 
   const totalBalanceUsd = useMemo(() => {
     return balances.reduce((acc, curr) => acc + parseFloat(curr.eqUsd), 0);
   }, [balances]);
 
   const displayBalance = useMemo(() => {
-     return totalBalanceUsd * service.exchangeRates[unit];
-  }, [totalBalanceUsd, unit, service.exchangeRates]);
+     return totalBalanceUsd * rate;
+  }, [totalBalanceUsd, rate]);
 
   const chartData = useMemo(() => {
     return balances
       .filter(b => parseFloat(b.eqUsd) > 10)
       .map(b => ({
         name: b.ccy,
-        value: parseFloat(b.eqUsd)
+        value: parseFloat(b.eqUsd) * rate // FIX: Pie chart values in selected unit
       }))
       .sort((a, b) => b.value - a.value);
-  }, [balances]);
+  }, [balances, rate]);
 
   const handleCancelOrder = async (order: Order) => {
     try {
@@ -238,9 +252,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                 <div className="text-2xl md:text-3xl font-bold text-text tracking-tight">
                     {hideBalance ? '******' : (
                         <>
-                        {unit === 'USD' && '$'}
-                        {unit === 'CNY' && '¥'}
-                        {unit === 'BTC' && '₿'}
+                        {currencySymbol}
                         {displayBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: unit === 'BTC' ? 6 : 2 })}
                         </>
                     )}
@@ -250,25 +262,28 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                 </div>
             </div>
 
-            {/* 2. Period PnL (Linked to selected period) */}
+            {/* 2. Period PnL (Dynamic Title & Value & Unit) */}
             <div className="flex flex-col justify-center pt-4 md:pt-0 md:border-l md:border-border md:pl-6">
                  <div className="flex items-center space-x-2 text-muted mb-1">
                     <DollarSign size={18} />
                     <span className="text-sm font-medium">
-                        {period === '1D' ? t.dailyPnl : `${period} PnL`}
+                        {period === '1D' ? '今日盈亏' : `${period} 盈亏`}
                     </span>
                  </div>
                  <div className={`text-2xl font-bold tracking-tight ${periodPnL >= 0 ? 'text-success' : 'text-danger'}`}>
                     {hideBalance ? '******' : (
                         <>
-                        {periodPnL > 0 ? '+' : ''}${formatAmount(periodPnL)}
+                        {periodPnL > 0 ? '+' : ''}{currencySymbol}{formatAmount(periodPnL)}
                         </>
                     )}
                  </div>
-                 <div className="text-xs text-muted mt-1">Realized & Unrealized ({period})</div>
+                 {/* FIX: Localized text */}
+                 <div className="text-xs text-muted mt-1">
+                    {period === '1D' ? '包含今日已实现 & 未实现盈亏' : `${period} 内资产净值变化`}
+                 </div>
             </div>
 
-            {/* 3. Account Status */}
+            {/* 3. Account Status (Localized) */}
             <div className="flex flex-col justify-center pt-4 md:pt-0 md:border-l md:border-border md:pl-6">
                 <div className="flex items-center space-x-2 text-muted mb-1">
                     <ShieldCheck size={18} />
@@ -276,9 +291,10 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="px-3 py-1 bg-success/10 text-success rounded-full text-xs font-bold uppercase tracking-wide border border-success/20">
-                        Active
+                        安全
                     </div>
-                    <span className="text-xs text-muted">Margin Ratio: Low</span>
+                    {/* FIX: Localized text */}
+                    <span className="text-xs text-muted">保证金风险: 低</span>
                 </div>
             </div>
         </div>
@@ -310,15 +326,17 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
             <div className="flex-1 w-full min-h-[180px]">
                  {processedHistory.length < 2 ? (
                     <div className="h-full flex flex-col items-center justify-center text-muted text-sm border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-lg">
-                        <p>Not enough history data.</p>
+                        <p>暂无历史数据</p>
+                        <p className="text-[10px] mt-1 text-muted">请保持应用开启以积累数据</p>
                     </div>
                 ) : (
                     <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={processedHistory}>
                             <defs>
                                 <linearGradient id="colorEq" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
-                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                    {/* FIX: Dynamic Gradient Color */}
+                                    <stop offset="5%" stopColor={trendColor} stopOpacity={0.2}/>
+                                    <stop offset="95%" stopColor={trendColor} stopOpacity={0}/>
                                 </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke={theme === 'dark' ? "#334155" : "#e2e8f0"} vertical={false} />
@@ -340,17 +358,18 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                                 stroke="#94a3b8"
                                 fontSize={10}
                                 domain={['auto', 'auto']}
-                                tickFormatter={(val) => hideBalance ? '***' : `$${val/1000}k`}
+                                tickFormatter={(val) => hideBalance ? '***' : `${currencySymbol}${val >= 1000 ? (val/1000).toFixed(1) + 'k' : val.toFixed(0)}`}
                                 tickLine={false}
                                 axisLine={false}
-                                width={30}
+                                width={35}
                             />
                             <RechartsTooltip 
                                 contentStyle={{ backgroundColor: theme === 'dark' ? '#1e293b' : '#ffffff', borderColor: '#334155', color: theme === 'dark' ? '#f1f5f9' : '#0f172a', fontSize: '12px' }}
                                 labelFormatter={(ts) => new Date(ts).toLocaleString()}
-                                formatter={(value: number) => [hideBalance ? '******' : `$${value.toLocaleString()}`, 'Equity']}
+                                formatter={(value: number) => [hideBalance ? '******' : `${currencySymbol}${formatAmount(value)}`, '总权益']}
                             />
-                            <Area type="monotone" dataKey="totalEq" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorEq)" />
+                            {/* FIX: type="linear" for sharp lines, dynamic stroke color */}
+                            <Area type="linear" dataKey="totalEq" stroke={trendColor} strokeWidth={2} fillOpacity={1} fill="url(#colorEq)" />
                             
                             {/* Max Point Marker */}
                             {maxPoint && (
@@ -381,17 +400,17 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
             <table className="w-full text-left text-sm">
                 <thead className="bg-slate-100 dark:bg-slate-900/50 text-muted text-xs uppercase">
                     <tr>
-                        <th className="px-6 py-3">{t.symbol}</th>
-                        <th className="px-6 py-3">Side</th>
-                        <th className="px-6 py-3">{t.size}</th>
-                        <th className="px-6 py-3 text-right">{t.entryPrice}</th>
-                        <th className="px-6 py-3 text-right">{t.pnl}</th>
-                        <th className="px-6 py-3 text-right">{t.action}</th>
+                        <th className="px-6 py-3 whitespace-nowrap">{t.symbol}</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Side</th>
+                        <th className="px-6 py-3 whitespace-nowrap">{t.size}</th>
+                        <th className="px-6 py-3 text-right whitespace-nowrap">{t.entryPrice}</th>
+                        <th className="px-6 py-3 text-right whitespace-nowrap">{t.pnl}</th>
+                        <th className="px-6 py-3 text-right whitespace-nowrap">{t.action}</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                     {positions.length === 0 ? (
-                        <tr><td colSpan={6} className="p-6 text-center text-muted">No open positions</td></tr>
+                        <tr><td colSpan={6} className="p-6 text-center text-muted">暂无持仓</td></tr>
                     ) : positions.map((pos) => {
                         let sizeDisplay = '';
                         let suffix = '';
@@ -462,6 +481,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Asset List */}
         <div className="bg-surface rounded-xl border border-border shadow-lg overflow-hidden transition-colors">
           <div className="p-4 border-b border-border flex justify-between items-center">
             <h3 className="font-semibold text-lg">{t.myAssets}</h3>
@@ -470,9 +490,9 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
             <table className="w-full text-left">
               <thead className="bg-slate-100 dark:bg-slate-900/50 text-muted text-xs uppercase sticky top-0 backdrop-blur-md">
                 <tr>
-                  <th className="px-6 py-3">{t.symbol}</th>
-                  <th className="px-6 py-3 text-right">{t.balance}</th>
-                  <th className="px-6 py-3 text-right">{t.value} (USD)</th>
+                  <th className="px-6 py-3 whitespace-nowrap">{t.symbol}</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">{t.balance}</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">{t.value} ({unit})</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -488,7 +508,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                       {hideBalance ? '****' : formatAmount(asset.availBal)}
                     </td>
                     <td className="px-6 py-4 text-right font-mono text-sm">
-                      {hideBalance ? '****' : `$${formatAmount(asset.eqUsd)}`}
+                      {hideBalance ? '****' : `${currencySymbol}${formatAmount(parseFloat(asset.eqUsd) * rate)}`}
                     </td>
                   </tr>
                 ))}
@@ -497,6 +517,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
           </div>
         </div>
 
+        {/* Portfolio Pie Chart */}
         <div className="bg-surface rounded-xl border border-border shadow-lg p-6 flex flex-col transition-colors">
           <h3 className="font-semibold text-lg mb-4">{t.allocation}</h3>
           <div className="flex-1 min-h-[300px]">
