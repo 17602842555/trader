@@ -161,10 +161,9 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
 
   return (
     <div className="space-y-6 animate-fadeIn pb-10">
-      {/* Responsive Grid: 1 col on mobile portrait, 2 cols on mobile landscape/tablet, 3 on desktop */}
+      {/* 优化: 确保所有顶部卡片在横屏下垂直填充一致 (Req #3) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-        {/* Total Assets Card (Req #3: Added min-h for better background fill in landscape) */}
-        <div className="bg-surface p-6 rounded-xl border border-border shadow-lg transition-colors min-h-[150px]">
+        <div className="bg-surface p-6 rounded-xl border border-border shadow-lg transition-colors min-h-[150px] flex flex-col justify-center">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center space-x-3 text-muted">
                 <Wallet size={20} />
@@ -221,8 +220,9 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
               </div>
           )}
         </div>
-
-        <div className="bg-surface p-6 rounded-xl border border-border shadow-lg transition-colors min-h-[150px]">
+        
+        {/* 占位卡片 1: 每日盈亏 (确保与总资产卡片对齐) */}
+        <div className="bg-surface p-6 rounded-xl border border-border shadow-lg transition-colors min-h-[150px] flex flex-col justify-center">
           <div className="flex items-center space-x-3 mb-2 text-muted">
             <DollarSign size={20} />
             <span className="text-sm font-medium">{t.dailyPnl}</span>
@@ -232,6 +232,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
           </div>
         </div>
 
+        {/* 占位卡片 2: 账户状态 (确保与总资产卡片对齐) */}
         <div className="bg-surface p-6 rounded-xl border border-border shadow-lg flex flex-col justify-center items-start transition-colors min-h-[150px]">
              <div className="text-muted text-sm mb-2">{t.accountStatus}</div>
              <div className="px-3 py-1 bg-success/20 text-success rounded-full text-xs font-bold uppercase tracking-wide">
@@ -240,7 +241,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
         </div>
       </div>
 
-      {/* Asset Trend Chart (Real Data) */}
+      {/* Asset Trend Chart */}
       <div className="bg-surface rounded-xl border border-border shadow-lg p-6 transition-colors">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
             <h3 className="font-semibold text-lg flex items-center gap-2">
@@ -308,9 +309,99 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
         </div>
       </div>
 
-      {/* Req #2: Spot/Allocation are missing -> They are here, we ensure they are visible on small screen */}
+      {/* Positions Section */}
+      <div className="bg-surface rounded-xl border border-border shadow-lg overflow-hidden transition-colors">
+        <div className="p-4 border-b border-border">
+            <h3 className="font-semibold text-lg">{t.positions}</h3>
+        </div>
+        <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+                <thead className="bg-slate-100 dark:bg-slate-900/50 text-muted text-xs uppercase">
+                    <tr>
+                        <th className="px-6 py-3">{t.symbol}</th>
+                        <th className="px-6 py-3">Side</th>
+                        <th className="px-6 py-3">{t.size}</th>
+                        <th className="px-6 py-3 text-right">{t.entryPrice}</th>
+                        <th className="px-6 py-3 text-right">{t.pnl}</th>
+                        <th className="px-6 py-3 text-right">{t.action}</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                    {positions.length === 0 ? (
+                        <tr><td colSpan={6} className="p-6 text-center text-muted">No open positions</td></tr>
+                    ) : positions.map((pos) => {
+                        let sizeDisplay = '';
+                        let suffix = '';
+                        
+                        if (pos.instId.includes('SWAP') && pos.ctVal) {
+                             sizeDisplay = `${(parseFloat(pos.pos) * parseFloat(pos.ctVal)).toFixed(4)}`;
+                             suffix = pos.instId.split('-')[0]; // e.g. BTC
+                        } else {
+                             sizeDisplay = formatAmount(pos.pos);
+                             suffix = pos.ccy;
+                        }
+
+                        return (
+                        <React.Fragment key={pos.instId}>
+                            <tr className="hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
+                                {/* 优化: 使用 whitespace-nowrap 防止换行不一致 (Req #4) */}
+                                <td className="px-6 py-4 font-medium flex items-center gap-2 whitespace-nowrap">
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${pos.instId.includes('SWAP') ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                                        {pos.instId.includes('SWAP') ? t.contract : t.spot}
+                                    </span>
+                                    {pos.instId}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                    <span className={`uppercase font-bold text-xs px-2 py-1 rounded ${pos.posSide === 'short' ? 'bg-danger/20 text-danger' : 'bg-success/20 text-success'}`}>
+                                        {pos.posSide}
+                                    </span>
+                                </td>
+                                <td className="px-6 py-4 font-mono whitespace-nowrap">{sizeDisplay} <span className="text-muted text-xs">{suffix}</span></td>
+                                <td className="px-6 py-4 text-right font-mono whitespace-nowrap">{formatPrice(pos.avgPx)}</td>
+                                <td className={`px-6 py-4 text-right font-mono font-bold whitespace-nowrap ${parseFloat(pos.upl) >= 0 ? 'text-success' : 'text-danger'}`}>
+                                    {hideBalance ? '****' : (
+                                        <>
+                                        {parseFloat(pos.upl) > 0 ? '+' : ''}{formatPrice(pos.upl)}
+                                        </>
+                                    )}
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                                    <button 
+                                        onClick={() => setExpandedPosition(expandedPosition === pos.instId ? null : pos.instId)}
+                                        className="text-primary hover:text-blue-400 flex items-center justify-end gap-1 ml-auto text-xs bg-slate-200 dark:bg-slate-800 px-2 py-1 rounded"
+                                    >
+                                        {t.viewChart} {expandedPosition === pos.instId ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                                    </button>
+                                </td>
+                            </tr>
+                            {expandedPosition === pos.instId && (
+                                <tr>
+                                    <td colSpan={6} className="p-4 bg-slate-50 dark:bg-slate-900/50 h-[450px]">
+                                        <div className="w-full h-full rounded-lg overflow-hidden border border-border bg-surface">
+                                            <TradingChart 
+                                                instId={pos.instId} 
+                                                theme={theme} 
+                                                service={service} 
+                                                position={pos}
+                                                orders={expandedOrders}
+                                                onCancelOrder={handleCancelOrder}
+                                                onModifyOrder={handleModifyOrder}
+                                                onAddAlgo={handleAddAlgo}
+                                            />
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </React.Fragment>
+                    )})}
+                </tbody>
+            </table>
+        </div>
+      </div>
+
+      {/* 资产列表和饼图 (Req #2: 它们被移到了这里，以优化顶部空间) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Asset List (My Assets) */}
+        {/* Asset List */}
         <div className="bg-surface rounded-xl border border-border shadow-lg overflow-hidden transition-colors">
           <div className="p-4 border-b border-border flex justify-between items-center">
             <h3 className="font-semibold text-lg">{t.myAssets}</h3>
@@ -346,7 +437,7 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
           </div>
         </div>
 
-        {/* Portfolio Pie Chart (Allocation) */}
+        {/* Portfolio Pie Chart */}
         <div className="bg-surface rounded-xl border border-border shadow-lg p-6 flex flex-col transition-colors">
           <h3 className="font-semibold text-lg mb-4">{t.allocation}</h3>
           <div className="flex-1 min-h-[300px]">
