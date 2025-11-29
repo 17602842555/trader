@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { AssetBalance, Position, AssetHistory, TimePeriod, CurrencyUnit, Order } from '../types';
 import { OKXService } from '../services/okxService';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceDot, Label } from 'recharts';
 import { Wallet, TrendingUp, DollarSign, ChevronDown, ChevronUp, Activity, ArrowRightLeft, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import TradingChart from './TradingChart';
 import { formatPrice, formatAmount, formatPct } from '../utils/formatting';
@@ -60,6 +60,43 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
     };
   }, [expandedPosition, service]);
 
+  // --- Data Processing for Chart & Stats ---
+  const processedHistory = useMemo(() => {
+      return assetHistory.map(item => ({
+          ...item,
+          tsNum: parseInt(item.ts), // Convert to number for continuous axis
+          val: parseFloat(item.totalEq)
+      }));
+  }, [assetHistory]);
+
+  const { minPoint, maxPoint, periodPnL, periodPnLPct, startEq, endEq } = useMemo(() => {
+      if (processedHistory.length < 2) return { 
+          minPoint: null, maxPoint: null, periodPnL: 0, periodPnLPct: 0, startEq: 0, endEq: 0 
+      };
+      
+      let min = processedHistory[0];
+      let max = processedHistory[0];
+      
+      processedHistory.forEach(h => {
+          if (h.val < min.val) min = h;
+          if (h.val > max.val) max = h;
+      });
+
+      const start = processedHistory[0].val;
+      const end = processedHistory[processedHistory.length - 1].val;
+      const change = end - start;
+      const pct = start === 0 ? 0 : (change / start) * 100;
+
+      return { 
+          minPoint: min, 
+          maxPoint: max, 
+          periodPnL: change, 
+          periodPnLPct: pct,
+          startEq: start,
+          endEq: end
+      };
+  }, [processedHistory]);
+
   const totalBalanceUsd = useMemo(() => {
     return balances.reduce((acc, curr) => acc + parseFloat(curr.eqUsd), 0);
   }, [balances]);
@@ -67,14 +104,6 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
   const displayBalance = useMemo(() => {
      return totalBalanceUsd * service.exchangeRates[unit];
   }, [totalBalanceUsd, unit, service.exchangeRates]);
-
-  const percentageChange = useMemo(() => {
-      if (assetHistory.length < 2) return 0;
-      const startEq = assetHistory[0].totalEq;
-      if (startEq === 0) return 0;
-      const currentEq = assetHistory[assetHistory.length - 1].totalEq;
-      return ((currentEq - startEq) / startEq) * 100;
-  }, [assetHistory]);
 
   const chartData = useMemo(() => {
     return balances
@@ -216,21 +245,27 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                         </>
                     )}
                 </div>
-                <div className={`mt-1 text-xs flex items-center font-medium ${percentageChange >= 0 ? 'text-success' : 'text-danger'}`}>
-                    <TrendingUp size={14} className="mr-1" /> {formatPct(percentageChange)} ({period})
+                <div className={`mt-1 text-xs flex items-center font-medium ${periodPnLPct >= 0 ? 'text-success' : 'text-danger'}`}>
+                    <TrendingUp size={14} className="mr-1" /> {formatPct(periodPnLPct)} ({period})
                 </div>
             </div>
 
-            {/* 2. Daily PnL */}
+            {/* 2. Period PnL (Linked to selected period) */}
             <div className="flex flex-col justify-center pt-4 md:pt-0 md:border-l md:border-border md:pl-6">
                  <div className="flex items-center space-x-2 text-muted mb-1">
                     <DollarSign size={18} />
-                    <span className="text-sm font-medium">{t.dailyPnl}</span>
+                    <span className="text-sm font-medium">
+                        {period === '1D' ? t.dailyPnl : `${period} PnL`}
+                    </span>
                  </div>
-                 <div className="text-2xl font-bold text-success tracking-tight">
-                    {hideBalance ? '******' : '--'}
+                 <div className={`text-2xl font-bold tracking-tight ${periodPnL >= 0 ? 'text-success' : 'text-danger'}`}>
+                    {hideBalance ? '******' : (
+                        <>
+                        {periodPnL > 0 ? '+' : ''}${formatAmount(periodPnL)}
+                        </>
+                    )}
                  </div>
-                 <div className="text-xs text-muted mt-1">Today's realized & unrealized</div>
+                 <div className="text-xs text-muted mt-1">Realized & Unrealized ({period})</div>
             </div>
 
             {/* 3. Account Status */}
@@ -273,13 +308,13 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
             </div>
 
             <div className="flex-1 w-full min-h-[180px]">
-                 {assetHistory.length < 2 ? (
+                 {processedHistory.length < 2 ? (
                     <div className="h-full flex flex-col items-center justify-center text-muted text-sm border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-lg">
                         <p>Not enough history data.</p>
                     </div>
                 ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={assetHistory}>
+                        <AreaChart data={processedHistory}>
                             <defs>
                                 <linearGradient id="colorEq" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
@@ -288,9 +323,11 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke={theme === 'dark' ? "#334155" : "#e2e8f0"} vertical={false} />
                             <XAxis 
-                                dataKey="ts" 
+                                dataKey="tsNum" 
+                                type="number"
+                                domain={['dataMin', 'dataMax']}
                                 tickFormatter={(ts) => {
-                                    const date = new Date(parseInt(ts));
+                                    const date = new Date(ts);
                                     return period === '1D' ? date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : date.toLocaleDateString(undefined, {month:'numeric', day:'numeric'});
                                 }}
                                 stroke="#94a3b8"
@@ -310,10 +347,24 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
                             />
                             <RechartsTooltip 
                                 contentStyle={{ backgroundColor: theme === 'dark' ? '#1e293b' : '#ffffff', borderColor: '#334155', color: theme === 'dark' ? '#f1f5f9' : '#0f172a', fontSize: '12px' }}
-                                labelFormatter={(ts) => new Date(parseInt(ts)).toLocaleString()}
+                                labelFormatter={(ts) => new Date(ts).toLocaleString()}
                                 formatter={(value: number) => [hideBalance ? '******' : `$${value.toLocaleString()}`, 'Equity']}
                             />
                             <Area type="monotone" dataKey="totalEq" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorEq)" />
+                            
+                            {/* Max Point Marker */}
+                            {maxPoint && (
+                                <ReferenceDot x={maxPoint.tsNum} y={maxPoint.val} r={4} fill="#10b981" stroke={theme==='dark'?'#1e293b':'#fff'} strokeWidth={2} isFront={true}>
+                                    <Label value={hideBalance ? '***' : formatAmount(maxPoint.val)} position="top" offset={10} fill="#10b981" fontSize={10} fontWeight="bold" />
+                                </ReferenceDot>
+                            )}
+                            
+                            {/* Min Point Marker */}
+                            {minPoint && (
+                                <ReferenceDot x={minPoint.tsNum} y={minPoint.val} r={4} fill="#ef4444" stroke={theme==='dark'?'#1e293b':'#fff'} strokeWidth={2} isFront={true}>
+                                    <Label value={hideBalance ? '***' : formatAmount(minPoint.val)} position="bottom" offset={10} fill="#ef4444" fontSize={10} fontWeight="bold" />
+                                </ReferenceDot>
+                            )}
                         </AreaChart>
                     </ResponsiveContainer>
                 )}
@@ -411,7 +462,6 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Asset List */}
         <div className="bg-surface rounded-xl border border-border shadow-lg overflow-hidden transition-colors">
           <div className="p-4 border-b border-border flex justify-between items-center">
             <h3 className="font-semibold text-lg">{t.myAssets}</h3>
@@ -447,7 +497,6 @@ const Dashboard: React.FC<DashboardProps> = ({ balances, service, t, theme, onAc
           </div>
         </div>
 
-        {/* Portfolio Pie Chart */}
         <div className="bg-surface rounded-xl border border-border shadow-lg p-6 flex flex-col transition-colors">
           <h3 className="font-semibold text-lg mb-4">{t.allocation}</h3>
           <div className="flex-1 min-h-[300px]">
